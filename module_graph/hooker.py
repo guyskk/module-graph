@@ -29,7 +29,7 @@ def mb(v):
     return round(v / 1024 / 1024)
 
 
-class MemoryRecord:
+class ModuleMemoryRecord:
     def __init__(
         self,
         module,
@@ -82,11 +82,11 @@ class MemoryHooker:
             if module != parent.module:
                 parent.children.add(module)
                 if self.handler:
-                    self.handler.on_child(parent)
+                    self.handler.on_child(parent, module)
 
     def _begin_module(self, module):
         memory_begin = get_memory_maxrss()
-        self.records.append(MemoryRecord(
+        self.records.append(ModuleMemoryRecord(
             module=module,
             memory_begin=memory_begin,
         ))
@@ -278,35 +278,65 @@ def wrap_sys_modules(hooker):
     return SysModulesDict()
 
 
-def patch_meta_path():
-    hooker = MemoryHooker()
+class ModuleMomoryHandler:
+    def __init__(self, save_to=None, verbose=False):
+        self.save_to = save_to
+        self.verbose = verbose
+        self.records = []
+
+    def on_child(self, parent_record, module):
+        if self.verbose:
+            parent = parent_record.module
+            print(f'* {parent} --> {module}')
+
+    def on_import(self, record: ModuleMemoryRecord):
+        self.records.append(record)
+        if self.verbose:
+            module = record.module + " "
+            memory_end_mb = " " + str(mb(record.memory_end))
+            real_usage_mb = "+" + str(mb(record.real_usage))
+            print(f'* {module:-<60s}-{memory_end_mb:->5s}M {real_usage_mb:>6s}M')
+
+    def get_sorted_records(self):
+        def key_func(x):
+            return max(x.real_usage, x.usage)
+        records = sorted(self.records, key=key_func, reverse=True)
+        return list(records)
+
+    def save(self):
+        if not self.save_to:
+            return
+        import json
+        import os.path
+        records = [x.to_dict() for x in self.get_sorted_records()]
+        content = json.dumps(records, indent=4, ensure_ascii=False)
+        if self.save_to == '-':
+            print(content)
+        else:
+            save_to = os.path.abspath(os.path.expanduser(self.save_to))
+            print(f'* save module graph to {save_to}')
+            os.makedirs(os.path.dirname(save_to), exist_ok=True)
+            with open(save_to, 'w') as f:
+                f.write(content)
+
+
+def setup_hooker(save_to=None, verbose=False):
+    handler = ModuleMomoryHandler(save_to=save_to, verbose=verbose)
+    hooker = MemoryHooker(handler=handler)
     meta_path = MetaPathList(hooker)
     meta_path.extend(sys.meta_path)
     sys.meta_path = meta_path
     sys.modules = wrap_sys_modules(hooker)
+    import atexit
+    atexit.register(handler.save)
     return hooker
 
 
 if __name__ == "__main__":
-    memory_hooker = patch_meta_path()
-
-    class DebugHandler:
-        def __init__(self):
-            self.records = []
-
-        def on_child(self, record):
-            print(record)
-
-        def on_import(self, record):
-            self.records.append(record)
-            print(record)
-
-    handler = DebugHandler()
-    memory_hooker.handler = handler
+    memory_hooker = setup_hooker(verbose=True)
     import string
     import importlib
     importlib.reload(string)
-    import json  # noqa: F401
     import urllib3  # noqa: F401
     from six import *  # noqa: F401,F403
     from asyncio import *  # noqa: F401,F403
