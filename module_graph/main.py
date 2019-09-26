@@ -1,4 +1,4 @@
-from .hook import patch_meta_path, MemoryRecord
+from .hook import patch_meta_path, MemoryRecord, mb
 
 
 if __name__ == "__main__":
@@ -11,10 +11,8 @@ import importlib  # noqa: E402
 import pkgutil  # noqa: E402
 import argparse  # noqa: E402
 import fnmatch  # noqa: E402
-
-
-def mb(v):
-    return round(v / 1024 / 1024)
+import warnings  # noqa: E402
+import json  # noqa: E402
 
 
 class MemoryReporter:
@@ -22,40 +20,33 @@ class MemoryReporter:
     def __init__(self, threshold=0):
         self.threshold = threshold
         self.records = []
-        self.finished_records = []
-        self._process = None
 
-    def handle(self, record: MemoryRecord):
-        self.finished_records.append(record)
-        record.memory_end = self.current_memory()
-        if self.records:
-            parent = self.records[-1]
-            parent.memory_inner = record.usage
-        real_usage = record.real_usage
+    def on_child(self, record: MemoryRecord):
+        pass
+
+    def on_import(self, record: MemoryRecord):
+        self.records.append(record)
         if record.usage >= self.threshold:
-            inner_mb = str(mb(record.memory_inner))
+            module = record.module + " "
             memory_end_mb = " " + str(mb(record.memory_end))
-            real_usage_mb = "+" + str(mb(real_usage))
-            print(f'* {module + " ":-<60s}-{memory_end_mb:->5s}M {inner_mb:>6s}M {real_usage_mb:>6s}M')
+            real_usage_mb = "+" + str(mb(record.real_usage))
+            print(f'* {module:-<60s}-{memory_end_mb:->5s}M {real_usage_mb:>6s}M')
 
-    def get_sorted_finished_records(self):
+    def get_sorted_records(self):
         def key_func(x):
             return max(x.real_usage, x.usage)
-        records = sorted(self.finished_records, key=key_func, reverse=True)
+        records = sorted(self.records, key=key_func, reverse=True)
         return list(records)
 
     def report(self, top=100):
-        for record in self.get_sorted_finished_records()[:top]:
-            inner_mb = " " + str(mb(record.memory_inner))
+        for record in self.get_sorted_records()[:top]:
+            usage_mb = " " + str(mb(record.usage))
             real_usage_mb = "+" + str(mb(record.real_usage))
-            print(f'* {record.module + " ":-<60s}-{inner_mb:->6s}M {real_usage_mb:>6s}M')
+            print(f'* {record.module + " ":-<60s}-{usage_mb:->6s}M {real_usage_mb:>6s}M')
 
     def save(self, fileobj):
-        fileobj.write('module,usage,real_usage\n')
-        for r in self.get_sorted_finished_records():
-            usage = mb(r.usage)
-            real_usage = mb(r.real_usage)
-            fileobj.write(f'{r.module},{usage},{real_usage}\n')
+        records = [x.to_dict() for x in self.get_sorted_records()]
+        json.dump(records, fileobj, indent=4, ensure_ascii=False)
 
 
 def find_all_modules(root):
@@ -107,9 +98,7 @@ whitenoise.django*
 BLACK_LIST = BLACK_LIST.strip().split()
 
 
-def main(modules, threshold=0, top=100, ignore=None, save_to=None):
-    memory_reporter.threshold = threshold
-
+def get_filter_func(ignore=None):
     ignore_list = list(BLACK_LIST)
     if ignore:
         ignore_list.append(ignore)
@@ -120,6 +109,14 @@ def main(modules, threshold=0, top=100, ignore=None, save_to=None):
                 return False
         return True
 
+    return filter_func
+
+
+def main(modules, threshold=0, top=100, ignore=None, save_to=None):
+    warnings.simplefilter("ignore")
+    memory_reporter = MemoryReporter(threshold=threshold)
+    memory_hooker.handler = memory_reporter
+    filter_func = get_filter_func(ignore=ignore)
     modules = [x for x in modules if filter_func(x)]
     roots = []
     failed_modules = set()

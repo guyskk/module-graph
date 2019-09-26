@@ -50,7 +50,8 @@ class MemoryRecord:
         type_name = type(self).__name__
         real_usage = mb(self.real_usage)
         usage = mb(self.usage)
-        return f'<{type_name} {self.module} {real_usage}M/{usage}M parent={self.parent} children={self.children}>'
+        return (f'<{type_name} {self.module} {real_usage}M/{usage}M '
+                f'parent={self.parent} children={self.children}>')
 
     @property
     def usage(self):
@@ -59,6 +60,15 @@ class MemoryRecord:
     @property
     def real_usage(self):
         return max(0, self.usage - self.memory_inner)
+
+    def to_dict(self):
+        return dict(
+            module=self.module,
+            parent=self.parent,
+            children=list(sorted(self.children)),
+            usage=self.usage,
+            real_usage=self.real_usage,
+        )
 
 
 class MemoryHooker:
@@ -69,9 +79,10 @@ class MemoryHooker:
     def _add_child(self, module):
         if self.records:
             parent = self.records[-1]
-            parent.children.add(module)
-            if self.handler:
-                self.handler.on_child(parent)
+            if module != parent.module:
+                parent.children.add(module)
+                if self.handler:
+                    self.handler.on_child(parent)
 
     def _begin_module(self, module):
         memory_begin = get_memory_maxrss()
@@ -83,7 +94,8 @@ class MemoryHooker:
     def _end_module(self, module):
         record = self.records.pop()
         if record.module != module:
-            raise ValueError(f'unexpected module {record.module}, expect {module}')
+            msg = f'unexpected module {record.module}, expect {module}'
+            raise ValueError(msg)
         record.memory_end = get_memory_maxrss()
         if self.records:
             parent = self.records[-1]
@@ -118,7 +130,8 @@ def wrap_loader(loader, hooker):
                 try:
                     return loader.create_module(spec)
                 except Exception as ex:
-                    raise ImportError(f'create module {spec.name} failed') from ex
+                    msg = f'create module {spec.name} failed'
+                    raise ImportError(msg) from ex
 
         if hasattr(loader, 'exec_module'):
             def exec_module(self, module):
@@ -126,9 +139,6 @@ def wrap_loader(loader, hooker):
                 hooker._begin_module(module_name)
                 try:
                     return loader.exec_module(module)
-                except Exception as ex:
-                    # must ignore all errors
-                    print(f'* exec_module {module} error {type(ex).__name__}: {ex}')
                 finally:
                     hooker._end_module(module_name)
 
@@ -210,23 +220,6 @@ class MetaPathList(list):
         return super().extend(map(self.__wrap_finder, iterable))
 
 
-class SysModulesDict(dict):
-    def __init__(self, hooker):
-        self.__hooker = hooker
-        super().__init__()
-
-    def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.__hooker._add_child(key)
-        return value
-
-    def get(self, key, *args, **kwargs):
-        value = super().get(key, *args, **kwargs)
-        if value is not None:
-            self.__hooker._add_child(key)
-        return value
-
-
 def wrap_sys_modules(hooker):
 
     sys_modules = sys.modules
@@ -266,6 +259,8 @@ def wrap_sys_modules(hooker):
 
         __hash__ = None
 
+        def __init__(self): pass
+
         def __getitem__(self, key):
             value = sys_modules.__getitem__(key)
             hooker._add_child(key)
@@ -300,7 +295,6 @@ if __name__ == "__main__":
             self.records = []
 
         def on_child(self, record):
-            pass
             print(record)
 
         def on_import(self, record):
