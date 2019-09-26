@@ -99,7 +99,7 @@ class MemoryHooker:
         record.memory_end = get_memory_maxrss()
         if self.records:
             parent = self.records[-1]
-            parent.memory_inner = record.usage
+            parent.memory_inner += record.usage
             record.parent = parent.module
         if self.handler:
             self.handler.on_import(record)

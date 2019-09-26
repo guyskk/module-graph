@@ -156,27 +156,30 @@ class RecordsProcessor:
         return cls.process(records, **kwargs)
 
 
+MB = 1024 * 1024
+
+
 def color_of(record):
-    usage = mb(record.usage)
-    if usage < 1:
+    usage = record.usage
+    if usage < 1 * MB:
         return 'grey'
-    real_usage = mb(record.real_usage)
-    if real_usage >= 100:
+    real_usage = record.real_usage
+    if real_usage >= 100 * MB:
         return 'red'
-    elif real_usage >= 10:
+    elif real_usage >= 10 * MB:
         return 'orange'
-    elif real_usage >= 1:
+    elif real_usage >= 1 * MB:
         return 'blue'
     else:
         return 'black'
 
 
 def label_of(record):
-    usage = mb(record.usage)
-    if usage < 1:
+    usage = record.usage
+    if usage < 1 * MB:
         return record.module
     real_usage = mb(record.real_usage)
-    return f'{record.module}\n{usage}/{real_usage}M'
+    return f'{record.module}\n{mb(usage)}/{real_usage}M'
 
 
 def render_dot(records):
@@ -206,7 +209,7 @@ def render_graph(
     input_filepath='data/module_graph.json',
     output_filepath='data/module_graph.pdf',
     modules_filepath=None,
-    threshold=None,
+    threshold=1,
 ):
     if modules_filepath:
         modules = read_modules(normalize_filepath(modules_filepath))
@@ -217,6 +220,7 @@ def render_graph(
         input_filepath, threshold=threshold, modules=modules)
     dot = render_dot(records)
     output_filepath = normalize_filepath(output_filepath)
+    print(f'* render to {output_filepath}')
     os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
     save_to, __ = os.path.splitext(output_filepath)
     dot.render(filename=save_to, format='pdf')
