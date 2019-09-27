@@ -23,7 +23,7 @@ def cli():
         help='top level modules to check, default all modules')
     parser.add_argument(
         '--ignore', dest='ignore', type=str,
-        help='ignore modules shell patterns')
+        help='ignore modules (shell patterns)')
     args = parser.parse_args()
     modules = args.modules if args.modules else None
     ignore = (args.ignore or '') + IGNORE
