@@ -14,7 +14,7 @@ setup(
     description=__doc__,
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/guyskk/module_graph',
+    url='https://github.com/guyskk/module-graph',
     author='guyskk',
     author_email='guyskk@qq.com',
     classifiers=[
